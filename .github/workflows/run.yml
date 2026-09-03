@@ -4,7 +4,7 @@ on:
   schedule:
     # 毎日 日本時間 午前8:00 (UTC 23:00) に自動実行
     - cron: '0 23 * * *'
-  workflow_dispatch: # 手動実行ボタンも有効化
+  workflow_dispatch:
 
 jobs:
   run-script:
@@ -27,9 +27,9 @@ jobs:
 
       - name: Cookieファイルの作成
         run: |
-          echo "$YOUTUBE_COOKIES" > youtube_cookies.json
-        env:
-          YOUTUBE_COOKIES: ${{ secrets.YOUTUBE_COOKIES }}
+          cat << 'EOF' > youtube_cookies.json
+          ${{ secrets.YOUTUBE_COOKIES }}
+          EOF
 
       - name: 自動取得プログラムの実行
         env:
