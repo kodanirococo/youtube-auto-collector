@@ -39,14 +39,14 @@ def fetch_youtube_metrics(page, video_id):
     base_url = f"https://studio.youtube.com/video/{video_id}/analytics"
     
     metrics = {
-        "ctr": "",              # AD列 (30)
-        "returning_rate": "",   # AF列 (32)
-        "retention_30s": "",    # AG列 (33)
-        "impressions": "",      # AM列 (39)
-        "product_clicks": "",   # AP列 (42)
-        "new_viewers": "",      # AR列 (44)
-        "returning_viewers": "",# AS列 (45)
-        "unique_viewers": ""    # AT列 (46)
+        "ctr": "",               # AD列 (30)
+        "returning_rate": "",    # AF列 (32)
+        "retention_30s": "",     # AG列 (33)
+        "impressions": "",       # AM列 (39)
+        "product_clicks": "",    # AP列 (42)
+        "new_viewers": "",       # AR列 (44)
+        "returning_viewers": "", # AS列 (45)
+        "unique_viewers": ""     # AT列 (46)
     }
 
     try:
@@ -205,6 +205,20 @@ def main():
 
     with open(cookie_file, "r", encoding="utf-8") as f:
         cookies = json.load(f)
+
+    # PlaywrightでエラーになるCookieの不適切な属性（sameSite等）をクリーニング
+    valid_samesite = ["Strict", "Lax", "None"]
+    for cookie in cookies:
+        if "sameSite" in cookie:
+            s_val = str(cookie["sameSite"]).capitalize()
+            if s_val in valid_samesite:
+                cookie["sameSite"] = s_val
+            else:
+                del cookie["sameSite"]
+        
+        # Playwright非対応のフィールドを削除
+        for key in ["storeId", "hostOnly", "session", "id", "partitionKey"]:
+            cookie.pop(key, None)
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
