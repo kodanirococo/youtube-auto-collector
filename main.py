@@ -50,71 +50,54 @@ def fetch_youtube_metrics(page, video_id):
     }
 
     try:
-        # 1. 概要 / リーチタブ（インプレッション数・CTR）
-        overview_url = f"{base_url}/tab-overview/period-default"
-        print(f"[{video_id}] 概要タブ読み込み中: {overview_url}")
-        page.goto(overview_url, wait_until="networkidle")
-        time.sleep(4)
-
-        # 概要/リーチ要素の解析
-        content = page.content()
-        
-        # リーチ/インプレッション解析
+        # 1. リーチタブ（インプレッション数・クリック率）
         reach_url = f"{base_url}/tab-reach_tab/period-default"
-        page.goto(reach_url, wait_until="networkidle")
-        time.sleep(4)
-        
-        # インプレッション数 & CTRの取得試行
-        try:
-            metric_cards = page.query_selector_all("ytcp-metric-visualizer")
-            for card in metric_cards:
-                text = card.inner_text()
-                if "インプレッション" in text and "クリック率" not in text:
-                    val = re.search(r"[\d,]+", text)
-                    if val:
-                        metrics["impressions"] = val.group(0).replace(",", "")
-                elif "クリック率" in text:
-                    val = re.search(r"[\d\.]+%?", text)
-                    if val:
-                        metrics["ctr"] = val.group(0)
-        except Exception as e:
-            print(f"[{video_id}] リーチメトリクス解析警告: {e}")
+        print(f"[{video_id}] リーチタブアクセス: {reach_url}")
+        page.goto(reach_url, wait_until="domcontentloaded")
+        time.sleep(5)
 
-        # 2. エンゲージメントタブ（30秒時点の維持率）
-        engagement_url = f"{base_url}/tab-engagement/period-default"
-        page.goto(engagement_url, wait_until="networkidle")
-        time.sleep(4)
-        try:
-            retention_elem = page.query_selector(".key-moments-retention, [id*='retention']")
-            if retention_elem:
-                val = re.search(r"[\d\.] process%", retention_elem.inner_text())
-                if val:
-                    metrics["retention_30s"] = val.group(0)
-        except Exception as e:
-            print(f"[{video_id}] 30秒維持率解析警告: {e}")
+        # ログイン・アクセスの確認
+        page_title = page.title()
+        print(f"[{video_id}] ページタイトル: {page_title}")
 
-        # 3. 視聴者タブ（リピーター数・新しい視聴者数・ユニーク視聴者数）
-        audience_url = f"{base_url}/tab-audience/period-default"
-        page.goto(audience_url, wait_until="networkidle")
-        time.sleep(4)
         try:
-            audience_cards = page.query_selector_all("ytcp-metric-visualizer, .metric-value")
-            for card in audience_cards:
-                text = card.inner_text()
-                if "新しい視聴者" in text:
-                    val = re.search(r"[\d,]+", text)
-                    if val:
-                        metrics["new_viewers"] = val.group(0).replace(",", "")
-                elif "リピーター" in text and "比率" not in text:
-                    val = re.search(r"[\d,]+", text)
-                    if val:
-                        metrics["returning_viewers"] = val.group(0).replace(",", "")
-                elif "ユニーク視聴者" in text:
-                    val = re.search(r"[\d,]+", text)
-                    if val:
-                        metrics["unique_viewers"] = val.group(0).replace(",", "")
+            body_text = page.inner_text("body")
             
-            # リピーター再生率の計算（リピーター数 / (リピーター数 + 新しい視聴者数)）
+            # インプレッション数の抽出試行
+            imp_match = re.search(r"インプレッション\s*([\d,]+)", body_text)
+            if imp_match:
+                metrics["impressions"] = imp_match.group(1).replace(",", "")
+            
+            # CTR（クリック率）の抽出試行
+            ctr_match = re.search(r"インプレッションのクリック率\s*([\d\.]+%?)", body_text)
+            if ctr_match:
+                metrics["ctr"] = ctr_match.group(1)
+                
+        except Exception as e:
+            print(f"[{video_id}] リーチ解析警告: {e}")
+
+        # 2. 視聴者タブ（リピーター・新しい視聴者・ユニーク視聴者）
+        audience_url = f"{base_url}/tab-audience/period-default"
+        print(f"[{video_id}] 視聴者タブアクセス: {audience_url}")
+        page.goto(audience_url, wait_until="domcontentloaded")
+        time.sleep(5)
+        
+        try:
+            body_text = page.inner_text("body")
+            
+            new_v_match = re.search(r"新しい視聴者\s*([\d,]+)", body_text)
+            if new_v_match:
+                metrics["new_viewers"] = new_v_match.group(1).replace(",", "")
+
+            ret_v_match = re.search(r"リピーター\s*([\d,]+)", body_text)
+            if ret_v_match:
+                metrics["returning_viewers"] = ret_v_match.group(1).replace(",", "")
+
+            uniq_v_match = re.search(r"ユニーク視聴者\s*([\d,]+)", body_text)
+            if uniq_v_match:
+                metrics["unique_viewers"] = uniq_v_match.group(1).replace(",", "")
+
+            # リピート再生率の計算
             if metrics["returning_viewers"] and metrics["new_viewers"]:
                 ret_v = float(metrics["returning_viewers"])
                 new_v = float(metrics["new_viewers"])
@@ -122,21 +105,12 @@ def fetch_youtube_metrics(page, video_id):
                     rate = (ret_v / (ret_v + new_v)) * 100
                     metrics["returning_rate"] = f"{rate:.2f}%"
         except Exception as e:
-            print(f"[{video_id}] 視聴者メトリクス解析警告: {e}")
+            print(f"[{video_id}] 視聴者解析警告: {e}")
 
-        # 4. 商品クリック数（詳細アナリティクスより）
-        # ※カード/概要欄クリックデータ
-        try:
-            product_elem = page.query_selector("[id*='product-click'], [class*='shopping']")
-            if product_elem:
-                val = re.search(r"[\d,]+", product_elem.inner_text())
-                if val:
-                    metrics["product_clicks"] = val.group(0).replace(",", "")
-        except Exception as e:
-            print(f"[{video_id}] 商品クリック数解析警告: {e}")
+        print(f"[{video_id}] 取得成功データ: {metrics}")
 
     except Exception as e:
-        print(f"[{video_id}] データ取得中にエラーが発生しました: {e}")
+        print(f"[{video_id}] エラーが発生しました: {e}")
 
     return metrics
 
@@ -163,33 +137,30 @@ def main():
     print(f"実行日: {today}")
 
     target_rows = []
-    # 2行目から順にチェック
+    # ヘッダーを除外して順次処理（2行目以降）
     for i, row in enumerate(rows[1:], start=2):
         if len(row) < 5:
             continue
 
-        # E列（インデックス4）から動画IDを取得
-        video_id = extract_video_id(row[4]) if len(row) > 4 else None
-        # AM列（インデックス38）のインプレッション数値を確認
-        am_val = row[38] if len(row) > 38 else ""
+        video_id = extract_video_id(row[4]) if len(row) > 4 else None # E列
+        am_val = row[38] if len(row) > 38 else ""                     # AM列 (インプレッション数)
 
         if not video_id:
             continue
 
-        # すでにインプレッションが入力済みの場合はスキップ
+        # すでにインプレッション数(AM列)が入っている場合はスキップ
         if am_val.strip():
             continue
 
-        # 公開日の判定（B列:年[1], C列:月[2], D列:日[3]）
         try:
-            pub_year = int(row[1])
-            pub_month = int(row[2])
-            pub_day = int(row[3])
+            pub_year = int(row[1])  # B列: 年
+            pub_month = int(row[2]) # C列: 月
+            pub_day = int(row[3])   # D列: 日
             pub_date = datetime(pub_year, pub_month, pub_day).date()
         except Exception:
             continue
 
-        # 公開から7日以上経過している未取得動画を対象にする
+        # 公開から7日以上経過しているかを判定
         days_passed = (today - pub_date).days
         if days_passed >= 7:
             print(f"対象動画を発見: 行 {i} | 動画ID: {video_id} | 公開日: {pub_date} ({days_passed}日前)")
@@ -206,7 +177,7 @@ def main():
     with open(cookie_file, "r", encoding="utf-8") as f:
         cookies = json.load(f)
 
-    # PlaywrightでエラーになるCookieの不適切な属性（sameSite等）をクリーニング
+    # クッキーデータのクレンジング
     valid_samesite = ["Strict", "Lax", "None"]
     for cookie in cookies:
         if "sameSite" in cookie:
@@ -216,10 +187,10 @@ def main():
             else:
                 del cookie["sameSite"]
         
-        # Playwright非対応のフィールドを削除
         for key in ["storeId", "hostOnly", "session", "id", "partitionKey"]:
             cookie.pop(key, None)
 
+    # ブラウザの自動操作・データ更新
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         context = browser.new_context()
@@ -230,26 +201,25 @@ def main():
             print(f"\n--- 行 {row_idx} (動画ID: {video_id}) のデータ取得開始 ---")
             metrics = fetch_youtube_metrics(page, video_id)
             
-            # 各列への書き込み
-            # AD列: 30, AF列: 32, AG列: 33, AM列: 39, AP列: 42, AR列: 44, AS列: 45, AT列: 46
+            # 各列へのセル書き込み (値がある場合のみ)
             if metrics["ctr"]:
-                ws.update_cell(row_idx, 30, metrics["ctr"])             # AD列
+                ws.update_cell(row_idx, 30, metrics["ctr"])             # AD列 (30)
             if metrics["returning_rate"]:
-                ws.update_cell(row_idx, 32, metrics["returning_rate"])  # AF列
+                ws.update_cell(row_idx, 32, metrics["returning_rate"])  # AF列 (32)
             if metrics["retention_30s"]:
-                ws.update_cell(row_idx, 33, metrics["retention_30s"])  # AG列
+                ws.update_cell(row_idx, 33, metrics["retention_30s"])  # AG列 (33)
             if metrics["impressions"]:
-                ws.update_cell(row_idx, 39, metrics["impressions"])    # AM列
+                ws.update_cell(row_idx, 39, metrics["impressions"])    # AM列 (39)
             if metrics["product_clicks"]:
-                ws.update_cell(row_idx, 42, metrics["product_clicks"]) # AP列
+                ws.update_cell(row_idx, 42, metrics["product_clicks"]) # AP列 (42)
             if metrics["new_viewers"]:
-                ws.update_cell(row_idx, 44, metrics["new_viewers"])     # AR列
+                ws.update_cell(row_idx, 44, metrics["new_viewers"])     # AR列 (44)
             if metrics["returning_viewers"]:
-                ws.update_cell(row_idx, 45, metrics["returning_viewers"]) # AS列
+                ws.update_cell(row_idx, 45, metrics["returning_viewers"]) # AS列 (45)
             if metrics["unique_viewers"]:
-                ws.update_cell(row_idx, 46, metrics["unique_viewers"]) # AT列
+                ws.update_cell(row_idx, 46, metrics["unique_viewers"]) # AT列 (46)
 
-            print(f"行 {row_idx} の全メトリクス更新完了")
+            print(f"行 {row_idx} の書き込み処理が完了しました。")
 
         browser.close()
 
